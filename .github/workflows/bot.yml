@@ -1071,7 +1071,7 @@ jobs:
           
           # Start Cloudflare Tunnel
           echo "Starting Cloudflare Tunnel..."
-          ./cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiYjE1ZDlhZjItODExMi00MGRiLWJkNmUtMjk2MTQ4N2IyZDQxIiwicyI6Ik0yVXlORFkxWW1FdFlUUTFOUzAwTTJSbUxUZzNabUV0Wm1WbE5UTTJaVFZsTlRFeCJ9 &
+          ./cloudflared tunnel run --url http://localhost:3000 --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiYjE1ZDlhZjItODExMi00MGRiLWJkNmUtMjk2MTQ4N2IyZDQxIiwicyI6Ik0yVXlORFkxWW1FdFlUUTFOUzAwTTJSbUxUZzNabUV0Wm1WbE5UTTJaVFZsTlRFeCJ9 &
           TUNNEL_PID=$!
           echo $TUNNEL_PID > ~/tunnel_pid.txt
           
@@ -1153,7 +1153,7 @@ jobs:
                 TUNNEL_PID=$(cat ~/tunnel_pid.txt)
                 if ! kill -0 $TUNNEL_PID 2>/dev/null; then
                   echo "Tunnel died, restarting..."
-                  ./cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiYjE1ZDlhZjItODExMi00MGRiLWJkNmUtMjk2MTQ4N2IyZDQxIiwicyI6Ik0yVXlORFkxWW1FdFlUUTFOUzAwTTJSbUxUZzNabUV0Wm1WbE5UTTJaVFZsTlRFeCJ9 &
+                  ./cloudflared tunnel run --url http://localhost:3000 --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiYjE1ZDlhZjItODExMi00MGRiLWJkNmUtMjk2MTQ4N2IyZDQxIiwicyI6Ik0yVXlORFkxWW1FdFlUUTFOUzAwTTJSbUxUZzNabUV0Wm1WbE5UTTJaVFZsTlRFeCJ9 &
                   echo $! > ~/tunnel_pid.txt
                   echo "Tunnel restarted"
                 fi
