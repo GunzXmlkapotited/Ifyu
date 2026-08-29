@@ -48,25 +48,40 @@ jobs:
           
           echo "Cloudflared tunnel running"
       
-      - name: Unzip Files
+      - name: Unzip and Setup Bot Files
         run: |
           echo "Extracting zip files..."
           
           for zipfile in *.zip; do
             if [ -f "$zipfile" ]; then
+              echo "Extracting: $zipfile"
               unzip -o "$zipfile"
               rm -f "$zipfile"
               echo "Extracted: $zipfile"
             fi
           done
+          
+          echo ""
+          echo "Files after extraction:"
+          ls -la
+          
+          echo ""
+          echo "Checking for package.json files..."
+          find . -name "package.json" -type f
       
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js 25
+        uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '25'
       
       - name: Install Node Dependencies
         run: |
           echo "Installing Node dependencies..."
+          
+          if [ -f "package.json" ]; then
+            echo "Found package.json in root, installing..."
+            npm install --no-audit --no-fund --silent || true
+          fi
           
           for dir in */; do
             if [ -f "${dir}package.json" ]; then
@@ -79,53 +94,84 @@ jobs:
           
           echo "Node dependencies installed"
       
-      - name: Start Bot with Auto Restart & Auto Trigger
+      - name: Start Bot with Auto Restart
         run: |
           echo "=========================================="
-          echo "BOT AUTO RESTART 24/7"
+          echo "STARTING BOT WITH AUTO RESTART"
           echo "=========================================="
           echo "Action lifetime: 5 jam 59 menit"
           echo "Auto trigger new workflow: 1 menit sebelum mati"
           echo "=========================================="
           
-          cat > super_restart.sh << 'EOF'
+          cat > start_bot.sh << 'EOF'
           #!/bin/bash
           
-          echo "SUPER AUTO RESTART BOT 24/7"
-          echo "=================================="
+          echo "Starting bot with auto restart..."
           
           find_main_file() {
-            for possible in "index.js" "app.js" "main.js" "server.js" "bot.js" "run.js" "start.js"; do
-              if [ -f "$possible" ]; then
-                echo "$possible"
-                return 0
-              fi
-            done
+            if [ -f "index.js" ]; then
+              echo "index.js"
+              return 0
+            fi
+            if [ -f "app.js" ]; then
+              echo "app.js"
+              return 0
+            fi
+            if [ -f "main.js" ]; then
+              echo "main.js"
+              return 0
+            fi
+            if [ -f "server.js" ]; then
+              echo "server.js"
+              return 0
+            fi
+            if [ -f "bot.js" ]; then
+              echo "bot.js"
+              return 0
+            fi
             
             for dir in */; do
-              for possible in "index.js" "app.js" "main.js" "server.js" "bot.js"; do
-                if [ -f "${dir}${possible}" ]; then
-                  echo "${dir}${possible}"
-                  return 0
-                fi
-              done
+              if [ -f "${dir}index.js" ]; then
+                echo "${dir}index.js"
+                return 0
+              fi
+              if [ -f "${dir}app.js" ]; then
+                echo "${dir}app.js"
+                return 0
+              fi
+              if [ -f "${dir}main.js" ]; then
+                echo "${dir}main.js"
+                return 0
+              fi
+              if [ -f "${dir}server.js" ]; then
+                echo "${dir}server.js"
+                return 0
+              fi
+              if [ -f "${dir}bot.js" ]; then
+                echo "${dir}bot.js"
+                return 0
+              fi
             done
             
             echo ""
             return 1
           }
           
-          start_bot() {
+          run_bot() {
             MAIN_FILE=$(find_main_file)
             
             if [ -z "$MAIN_FILE" ]; then
               echo "ERROR: No main file found!"
+              echo "Files in current directory:"
               ls -la
+              echo ""
+              echo "Files in subdirectories:"
+              ls -la */
               sleep 30
               return 1
             fi
             
-            echo "Main file: $MAIN_FILE"
+            echo "Starting bot: $MAIN_FILE"
             echo "Started at: $(date)"
             echo "-----------------------------------"
             
@@ -133,7 +179,7 @@ jobs:
             
             EXIT_CODE=$?
             echo "-----------------------------------"
-            echo "Bot exited with code: $EXIT_CODE"
+            echo "Bot stopped with code: $EXIT_CODE"
             echo "Restarting in 3 seconds..."
             sleep 3
             return $EXIT_CODE
@@ -144,18 +190,15 @@ jobs:
             echo "=========================================="
             echo "TRIGGERING NEW WORKFLOW"
             echo "=========================================="
-            echo "Current time: $(date)"
-            echo "Using GITHUB_TOKEN to trigger..."
+            echo "Time: $(date)"
             
             curl -X POST \
               -H "Authorization: token $GITHUB_TOKEN" \
               -H "Accept: application/vnd.github.v3+json" \
               https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/bot.yml/dispatches \
-              -d '{"ref":"main"}' \
-              -w "\nHTTP Status: %{http_code}\n"
+              -d '{"ref":"main"}'
             
             echo "New workflow triggered!"
-            echo "New action will start soon..."
             echo "=========================================="
           }
           
@@ -172,66 +215,64 @@ jobs:
             if [ $REMAINING -lt 60 ]; then
               echo ""
               echo "=========================================="
-              echo "1 MENIT TERSISA!"
+              echo "1 MINUTE REMAINING!"
               echo "Triggering new workflow..."
               echo "=========================================="
               
               trigger_new_workflow
               
-              echo ""
-              echo "Menunggu 30 detik sebelum exit..."
+              echo "Waiting 30 seconds before exit..."
               sleep 30
-              
-              echo "Exiting gracefully..."
+              echo "Exiting..."
               exit 0
             fi
             
             echo ""
             echo "=========================================="
-            echo "RESTART #$RESTART_COUNT"
+            echo "BOT RESTART #$RESTART_COUNT"
             echo "Runtime: $((ELAPSED / 3600))h $(((ELAPSED % 3600) / 60))m $((ELAPSED % 60))s"
             echo "Remaining: $((REMAINING / 3600))h $(((REMAINING % 3600) / 60))m $((REMAINING % 60))s"
             echo "Time: $(date)"
             echo "=========================================="
             
-            start_bot
+            run_bot
             
             echo "Restarting bot..."
             sleep 2
           done
           EOF
           
-          chmod +x super_restart.sh
+          chmod +x start_bot.sh
           
           export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
           
-          screen -dmS bot bash super_restart.sh
+          screen -dmS bot bash start_bot.sh
           
           echo ""
-          echo "Bot running with SUPER AUTO RESTART"
+          echo "Bot is running with auto restart"
           echo "Screen session: bot"
-          echo "Monitor: screen -r bot"
+          echo "To monitor: screen -r bot"
           echo "=========================================="
           
           cat > monitor.sh << 'MONITOR'
           #!/bin/bash
           
-          echo "Monitoring bot & auto trigger..."
+          echo "Monitoring bot..."
           
           while true; do
             sleep 60
             
             if ! screen -list | grep -q "bot"; then
               echo "Screen died! Restarting..."
-              screen -dmS bot bash super_restart.sh
+              screen -dmS bot bash start_bot.sh
               echo "Screen restarted"
             fi
             
-            if ! pgrep -f "node.*index.js\|node.*app.js\|node.*main.js\|node.*bot.js" > /dev/null; then
-              echo "Node process not found! Restarting screen..."
+            if ! pgrep -f "node" > /dev/null; then
+              echo "Node process not found! Restarting..."
               screen -S bot -X quit 2>/dev/null || true
-              screen -dmS bot bash super_restart.sh
-              echo "Bot process restarted"
+              screen -dmS bot bash start_bot.sh
+              echo "Bot restarted"
             fi
             
             if [ $((SECONDS % 300)) -eq 0 ]; then
@@ -262,7 +303,7 @@ jobs:
             echo "Remaining: $((REMAINING / 3600))h $(((REMAINING % 3600) / 60))m $((REMAINING % 60))s"
             
             if [ $REMAINING -lt 120 ] && [ $REMAINING -gt 60 ]; then
-              echo "Triggering new workflow (2 menit tersisa)..."
+              echo "Triggering new workflow (2 minutes remaining)..."
               curl -X POST \
                 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                 -H "Accept: application/vnd.github.v3+json" \
@@ -273,7 +314,7 @@ jobs:
             
             if ! screen -list | grep -q "bot"; then
               echo "Bot screen died! Restarting..."
-              screen -dmS bot bash super_restart.sh
+              screen -dmS bot bash start_bot.sh
             fi
             
             if ! screen -list | grep -q "monitor"; then
