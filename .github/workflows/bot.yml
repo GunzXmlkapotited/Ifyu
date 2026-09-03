@@ -50,24 +50,70 @@ jobs:
       
       - name: Unzip and Setup Bot Files
         run: |
-          echo "Extracting zip files..."
+          echo "=========================================="
+          echo "EXTRACTING ZIP FILES"
+          echo "=========================================="
           
+          # Lihat semua file sebelum extract
+          echo "Files before extraction:"
+          ls -la
+          echo ""
+          
+          # Extract semua file .zip
           for zipfile in *.zip; do
             if [ -f "$zipfile" ]; then
-              echo "Extracting: $zipfile"
+              echo "📦 Extracting: $zipfile"
               unzip -o "$zipfile"
-              rm -f "$zipfile"
-              echo "Extracted: $zipfile"
+              if [ $? -eq 0 ]; then
+                echo "✅ Successfully extracted: $zipfile"
+                rm -f "$zipfile"
+                echo "🗑️ Removed: $zipfile"
+              else
+                echo "❌ Failed to extract: $zipfile"
+              fi
+              echo ""
             fi
           done
           
-          echo ""
-          echo "Files after extraction:"
-          ls -la
+          # Extract semua file .rar (jika ada)
+          for rarfile in *.rar; do
+            if [ -f "$rarfile" ]; then
+              echo "📦 Extracting: $rarfile"
+              unrar x -o+ "$rarfile"
+              if [ $? -eq 0 ]; then
+                echo "✅ Successfully extracted: $rarfile"
+                rm -f "$rarfile"
+              else
+                echo "❌ Failed to extract: $rarfile"
+              fi
+              echo ""
+            fi
+          done
           
+          # Extract semua file .7z (jika ada)
+          for sevenzfile in *.7z; do
+            if [ -f "$sevenzfile" ]; then
+              echo "📦 Extracting: $sevenzfile"
+              7z x "$sevenzfile" -y
+              if [ $? -eq 0 ]; then
+                echo "✅ Successfully extracted: $sevenzfile"
+                rm -f "$sevenzfile"
+              else
+                echo "❌ Failed to extract: $sevenzfile"
+              fi
+              echo ""
+            fi
+          done
+          
+          echo "=========================================="
+          echo "FILES AFTER EXTRACTION:"
+          echo "=========================================="
+          ls -la
           echo ""
+          
           echo "Checking for package.json files..."
           find . -name "package.json" -type f
+          echo ""
       
       - name: Setup Node.js 25
         uses: actions/setup-node@v4
@@ -76,23 +122,30 @@ jobs:
       
       - name: Install Node Dependencies
         run: |
-          echo "Installing Node dependencies..."
+          echo "=========================================="
+          echo "INSTALLING NODE DEPENDENCIES"
+          echo "=========================================="
           
+          # Install di root
           if [ -f "package.json" ]; then
-            echo "Found package.json in root, installing..."
-            npm install --no-audit --no-fund --silent || true
+            echo "📦 Found package.json in root, installing..."
+            npm install --no-audit --no-fund --silent
+            echo "✅ Root dependencies installed"
           fi
           
+          # Install di subfolder
           for dir in */; do
             if [ -f "${dir}package.json" ]; then
-              echo "Installing in: $dir"
+              echo "📦 Installing in: $dir"
               cd "$dir"
-              npm install --no-audit --no-fund --silent || true
+              npm install --no-audit --no-fund --silent
               cd ..
+              echo "✅ Dependencies installed in $dir"
             fi
           done
           
-          echo "Node dependencies installed"
+          echo ""
+          echo "✅ All dependencies installed"
       
       - name: Start Bot with Auto Restart
         env:
@@ -177,7 +230,6 @@ jobs:
             echo "Started at: $(date)"
             echo "-----------------------------------"
             
-            # JALANKAN BOT - Jika crash/error, akan lanjut ke baris berikutnya
             node "$MAIN_FILE"
             
             EXIT_CODE=$?
@@ -215,7 +267,6 @@ jobs:
             ELAPSED=$((CURRENT_TIME - START_TIME))
             REMAINING=$((MAX_RUNTIME - ELAPSED))
             
-            # CEK WAKTU TERSISA - Trigger workflow baru biar 24/7
             if [ $REMAINING -lt 60 ]; then
               echo ""
               echo "=========================================="
@@ -239,7 +290,6 @@ jobs:
             echo "📅 Time: $(date)"
             echo "=========================================="
             
-            # Jalankan bot - Jika crash, loop akan restart
             run_bot
             
             echo "Restarting bot after crash..."
@@ -267,14 +317,12 @@ jobs:
           while true; do
             sleep 60
             
-            # Cek screen bot
             if ! screen -list | grep -q "bot"; then
               echo "⚠️ Screen died! Restarting..."
               screen -dmS bot bash start_bot.sh
               echo "✅ Screen restarted"
             fi
             
-            # Cek proses node
             if ! pgrep -f "node" > /dev/null; then
               echo "⚠️ Node process not found! Restarting..."
               screen -S bot -X quit 2>/dev/null || true
@@ -282,13 +330,11 @@ jobs:
               echo "✅ Bot restarted"
             fi
             
-            # Cek cloudflared
             if ! pgrep -f "cloudflared" > /dev/null; then
               echo "⚠️ Cloudflared died! Restarting..."
               cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 &
             fi
             
-            # Status tiap 5 menit
             if [ $((SECONDS % 300)) -eq 0 ]; then
               echo "[$(date)] ✅ Bot is running..."
               screen -ls
@@ -302,12 +348,11 @@ jobs:
           echo "✅ Monitor running"
           echo ""
           
-          # MAIN LOOP - Ini yang jalan selama 5 jam 59 menit
           START_TIME=$(date +%s)
           MAX_RUNTIME=$((5 * 3600 + 59 * 60))
           
           while true; do
-            sleep 300  # Cek tiap 5 menit
+            sleep 300
             
             CURRENT_TIME=$(date +%s)
             ELAPSED=$((CURRENT_TIME - START_TIME))
@@ -317,7 +362,6 @@ jobs:
             echo "Runtime: $((ELAPSED / 3600))h $(((ELAPSED % 3600) / 60))m $((ELAPSED % 60))s"
             echo "Remaining: $((REMAINING / 3600))h $(((REMAINING % 3600) / 60))m $((REMAINING % 60))s"
             
-            # Trigger 2 menit sebelum mati
             if [ $REMAINING -lt 120 ] && [ $REMAINING -gt 60 ]; then
               echo "🔄 Triggering new workflow (2 minutes remaining)..."
               curl -X POST \
@@ -328,7 +372,6 @@ jobs:
               echo "✅ New workflow triggered!"
             fi
             
-            # Restart jika mati
             if ! screen -list | grep -q "bot"; then
               echo "⚠️ Bot screen died! Restarting..."
               screen -dmS bot bash start_bot.sh
