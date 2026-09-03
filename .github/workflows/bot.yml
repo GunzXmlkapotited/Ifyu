@@ -95,18 +95,20 @@ jobs:
           echo "Node dependencies installed"
       
       - name: Start Bot with Auto Restart
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "=========================================="
           echo "STARTING BOT WITH AUTO RESTART"
           echo "=========================================="
-          echo "Action lifetime: 5 jam 59 menit"
-          echo "Auto trigger new workflow: 1 menit sebelum mati"
+          echo "✅ Auto restart on crash (langsung jalan lagi)"
+          echo "✅ Trigger new workflow setiap 6 jam (24/7)"
           echo "=========================================="
           
           cat > start_bot.sh << 'EOF'
           #!/bin/bash
           
-          echo "Starting bot with auto restart..."
+          echo "Starting bot with auto restart on crash..."
           
           find_main_file() {
             if [ -f "index.js" ]; then
@@ -175,12 +177,13 @@ jobs:
             echo "Started at: $(date)"
             echo "-----------------------------------"
             
+            # JALANKAN BOT - Jika crash/error, akan lanjut ke baris berikutnya
             node "$MAIN_FILE"
             
             EXIT_CODE=$?
             echo "-----------------------------------"
-            echo "Bot stopped with code: $EXIT_CODE"
-            echo "Restarting in 3 seconds..."
+            echo "❌ Bot stopped with code: $EXIT_CODE"
+            echo "🔄 Restarting in 3 seconds..."
             sleep 3
             return $EXIT_CODE
           }
@@ -188,7 +191,7 @@ jobs:
           trigger_new_workflow() {
             echo ""
             echo "=========================================="
-            echo "TRIGGERING NEW WORKFLOW"
+            echo "🔄 TRIGGERING NEW WORKFLOW (24/7)"
             echo "=========================================="
             echo "Time: $(date)"
             
@@ -198,7 +201,7 @@ jobs:
               https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/bot.yml/dispatches \
               -d '{"ref":"main"}'
             
-            echo "New workflow triggered!"
+            echo "✅ New workflow triggered!"
             echo "=========================================="
           }
           
@@ -212,10 +215,11 @@ jobs:
             ELAPSED=$((CURRENT_TIME - START_TIME))
             REMAINING=$((MAX_RUNTIME - ELAPSED))
             
+            # CEK WAKTU TERSISA - Trigger workflow baru biar 24/7
             if [ $REMAINING -lt 60 ]; then
               echo ""
               echo "=========================================="
-              echo "1 MINUTE REMAINING!"
+              echo "⚠️ 1 MINUTE REMAINING!"
               echo "Triggering new workflow..."
               echo "=========================================="
               
@@ -229,15 +233,16 @@ jobs:
             
             echo ""
             echo "=========================================="
-            echo "BOT RESTART #$RESTART_COUNT"
-            echo "Runtime: $((ELAPSED / 3600))h $(((ELAPSED % 3600) / 60))m $((ELAPSED % 60))s"
-            echo "Remaining: $((REMAINING / 3600))h $(((REMAINING % 3600) / 60))m $((REMAINING % 60))s"
-            echo "Time: $(date)"
+            echo "🚀 BOT RESTART #$RESTART_COUNT"
+            echo "⏱️ Runtime: $((ELAPSED / 3600))h $(((ELAPSED % 3600) / 60))m $((ELAPSED % 60))s"
+            echo "⏳ Remaining: $((REMAINING / 3600))h $(((REMAINING % 3600) / 60))m $((REMAINING % 60))s"
+            echo "📅 Time: $(date)"
             echo "=========================================="
             
+            # Jalankan bot - Jika crash, loop akan restart
             run_bot
             
-            echo "Restarting bot..."
+            echo "Restarting bot after crash..."
             sleep 2
           done
           EOF
@@ -249,9 +254,9 @@ jobs:
           screen -dmS bot bash start_bot.sh
           
           echo ""
-          echo "Bot is running with auto restart"
-          echo "Screen session: bot"
-          echo "To monitor: screen -r bot"
+          echo "✅ Bot is running with auto restart"
+          echo "📊 Screen session: bot"
+          echo "📋 To monitor: screen -r bot"
           echo "=========================================="
           
           cat > monitor.sh << 'MONITOR'
@@ -262,21 +267,30 @@ jobs:
           while true; do
             sleep 60
             
+            # Cek screen bot
             if ! screen -list | grep -q "bot"; then
-              echo "Screen died! Restarting..."
+              echo "⚠️ Screen died! Restarting..."
               screen -dmS bot bash start_bot.sh
-              echo "Screen restarted"
+              echo "✅ Screen restarted"
             fi
             
+            # Cek proses node
             if ! pgrep -f "node" > /dev/null; then
-              echo "Node process not found! Restarting..."
+              echo "⚠️ Node process not found! Restarting..."
               screen -S bot -X quit 2>/dev/null || true
               screen -dmS bot bash start_bot.sh
-              echo "Bot restarted"
+              echo "✅ Bot restarted"
             fi
             
+            # Cek cloudflared
+            if ! pgrep -f "cloudflared" > /dev/null; then
+              echo "⚠️ Cloudflared died! Restarting..."
+              cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 &
+            fi
+            
+            # Status tiap 5 menit
             if [ $((SECONDS % 300)) -eq 0 ]; then
-              echo "[$(date)] Bot is running..."
+              echo "[$(date)] ✅ Bot is running..."
               screen -ls
             fi
           done
@@ -285,14 +299,15 @@ jobs:
           chmod +x monitor.sh
           screen -dmS monitor bash monitor.sh
           
-          echo "Monitor running"
+          echo "✅ Monitor running"
           echo ""
           
+          # MAIN LOOP - Ini yang jalan selama 5 jam 59 menit
           START_TIME=$(date +%s)
           MAX_RUNTIME=$((5 * 3600 + 59 * 60))
           
           while true; do
-            sleep 300
+            sleep 300  # Cek tiap 5 menit
             
             CURRENT_TIME=$(date +%s)
             ELAPSED=$((CURRENT_TIME - START_TIME))
@@ -302,28 +317,30 @@ jobs:
             echo "Runtime: $((ELAPSED / 3600))h $(((ELAPSED % 3600) / 60))m $((ELAPSED % 60))s"
             echo "Remaining: $((REMAINING / 3600))h $(((REMAINING % 3600) / 60))m $((REMAINING % 60))s"
             
+            # Trigger 2 menit sebelum mati
             if [ $REMAINING -lt 120 ] && [ $REMAINING -gt 60 ]; then
-              echo "Triggering new workflow (2 minutes remaining)..."
+              echo "🔄 Triggering new workflow (2 minutes remaining)..."
               curl -X POST \
                 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                 -H "Accept: application/vnd.github.v3+json" \
                 https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot.yml/dispatches \
                 -d '{"ref":"main"}'
-              echo "New workflow triggered!"
+              echo "✅ New workflow triggered!"
             fi
             
+            # Restart jika mati
             if ! screen -list | grep -q "bot"; then
-              echo "Bot screen died! Restarting..."
+              echo "⚠️ Bot screen died! Restarting..."
               screen -dmS bot bash start_bot.sh
             fi
             
             if ! screen -list | grep -q "monitor"; then
-              echo "Monitor died! Restarting..."
+              echo "⚠️ Monitor died! Restarting..."
               screen -dmS monitor bash monitor.sh
             fi
             
             if ! pgrep -f "cloudflared" > /dev/null; then
-              echo "Cloudflared died! Restarting..."
+              echo "⚠️ Cloudflared died! Restarting..."
               cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 &
             fi
             
