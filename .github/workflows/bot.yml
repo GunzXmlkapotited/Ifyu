@@ -1,0 +1,393 @@
+name: Bot Auto Restart 24/7
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 359
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Dependencies
+        run: |
+          echo "Installing dependencies..."
+          
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            curl \
+            wget \
+            git \
+            unzip \
+            screen \
+            jq \
+            nano
+          
+          echo "Dependencies installed"
+      
+      - name: Install Cloudflared with Token
+        run: |
+          echo "Installing Cloudflared..."
+          
+          wget -q -O cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+          sudo mv cloudflared /usr/local/bin/
+          
+          cloudflared --version
+          
+          echo "Starting Cloudflared tunnel..."
+          cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 &
+          
+          echo "Cloudflared tunnel running"
+      
+      - name: Unzip and Setup Bot Files
+        run: |
+          echo "=========================================="
+          echo "EXTRACTING ZIP FILES"
+          echo "=========================================="
+          
+          # Lihat semua file sebelum extract
+          echo "Files before extraction:"
+          ls -la
+          echo ""
+          
+          # Extract semua file .zip
+          for zipfile in *.zip; do
+            if [ -f "$zipfile" ]; then
+              echo "📦 Extracting: $zipfile"
+              unzip -o "$zipfile"
+              if [ $? -eq 0 ]; then
+                echo "✅ Successfully extracted: $zipfile"
+                rm -f "$zipfile"
+                echo "🗑️ Removed: $zipfile"
+              else
+                echo "❌ Failed to extract: $zipfile"
+              fi
+              echo ""
+            fi
+          done
+          
+          # Extract semua file .rar (jika ada)
+          for rarfile in *.rar; do
+            if [ -f "$rarfile" ]; then
+              echo "📦 Extracting: $rarfile"
+              unrar x -o+ "$rarfile"
+              if [ $? -eq 0 ]; then
+                echo "✅ Successfully extracted: $rarfile"
+                rm -f "$rarfile"
+              else
+                echo "❌ Failed to extract: $rarfile"
+              fi
+              echo ""
+            fi
+          done
+          
+          # Extract semua file .7z (jika ada)
+          for sevenzfile in *.7z; do
+            if [ -f "$sevenzfile" ]; then
+              echo "📦 Extracting: $sevenzfile"
+              7z x "$sevenzfile" -y
+              if [ $? -eq 0 ]; then
+                echo "✅ Successfully extracted: $sevenzfile"
+                rm -f "$sevenzfile"
+              else
+                echo "❌ Failed to extract: $sevenzfile"
+              fi
+              echo ""
+            fi
+          done
+          
+          echo "=========================================="
+          echo "FILES AFTER EXTRACTION:"
+          echo "=========================================="
+          ls -la
+          echo ""
+          
+          echo "Checking for package.json files..."
+          find . -name "package.json" -type f
+          echo ""
+      
+      - name: Setup Node.js 25
+        uses: actions/setup-node@v4
+        with:
+          node-version: '25'
+      
+      - name: Install Node Dependencies
+        run: |
+          echo "=========================================="
+          echo "INSTALLING NODE DEPENDENCIES"
+          echo "=========================================="
+          
+          # Install di root
+          if [ -f "package.json" ]; then
+            echo "📦 Found package.json in root, installing..."
+            npm install --no-audit --no-fund --silent
+            echo "✅ Root dependencies installed"
+          fi
+          
+          # Install di subfolder
+          for dir in */; do
+            if [ -f "${dir}package.json" ]; then
+              echo "📦 Installing in: $dir"
+              cd "$dir"
+              npm install --no-audit --no-fund --silent
+              cd ..
+              echo "✅ Dependencies installed in $dir"
+            fi
+          done
+          
+          echo ""
+          echo "✅ All dependencies installed"
+      
+      - name: Start Bot with Auto Restart
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=========================================="
+          echo "STARTING BOT WITH AUTO RESTART"
+          echo "=========================================="
+          echo "✅ Auto restart on crash (langsung jalan lagi)"
+          echo "✅ Trigger new workflow setiap 6 jam (24/7)"
+          echo "=========================================="
+          
+          cat > start_bot.sh << 'EOF'
+          #!/bin/bash
+          
+          echo "Starting bot with auto restart on crash..."
+          
+          find_main_file() {
+            if [ -f "index.js" ]; then
+              echo "index.js"
+              return 0
+            fi
+            if [ -f "app.js" ]; then
+              echo "app.js"
+              return 0
+            fi
+            if [ -f "main.js" ]; then
+              echo "main.js"
+              return 0
+            fi
+            if [ -f "server.js" ]; then
+              echo "server.js"
+              return 0
+            fi
+            if [ -f "bot.js" ]; then
+              echo "bot.js"
+              return 0
+            fi
+            
+            for dir in */; do
+              if [ -f "${dir}index.js" ]; then
+                echo "${dir}index.js"
+                return 0
+              fi
+              if [ -f "${dir}app.js" ]; then
+                echo "${dir}app.js"
+                return 0
+              fi
+              if [ -f "${dir}main.js" ]; then
+                echo "${dir}main.js"
+                return 0
+              fi
+              if [ -f "${dir}server.js" ]; then
+                echo "${dir}server.js"
+                return 0
+              fi
+              if [ -f "${dir}bot.js" ]; then
+                echo "${dir}bot.js"
+                return 0
+              fi
+            done
+            
+            echo ""
+            return 1
+          }
+          
+          run_bot() {
+            MAIN_FILE=$(find_main_file)
+            
+            if [ -z "$MAIN_FILE" ]; then
+              echo "ERROR: No main file found!"
+              echo "Files in current directory:"
+              ls -la
+              echo ""
+              echo "Files in subdirectories:"
+              ls -la */
+              sleep 30
+              return 1
+            fi
+            
+            echo "Starting bot: $MAIN_FILE"
+            echo "Started at: $(date)"
+            echo "-----------------------------------"
+            
+            node "$MAIN_FILE"
+            
+            EXIT_CODE=$?
+            echo "-----------------------------------"
+            echo "❌ Bot stopped with code: $EXIT_CODE"
+            echo "🔄 Restarting in 3 seconds..."
+            sleep 3
+            return $EXIT_CODE
+          }
+          
+          trigger_new_workflow() {
+            echo ""
+            echo "=========================================="
+            echo "🔄 TRIGGERING NEW WORKFLOW (24/7)"
+            echo "=========================================="
+            echo "Time: $(date)"
+            
+            curl -X POST \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/bot.yml/dispatches \
+              -d '{"ref":"main"}'
+            
+            echo "✅ New workflow triggered!"
+            echo "=========================================="
+          }
+          
+          RESTART_COUNT=0
+          START_TIME=$(date +%s)
+          MAX_RUNTIME=$((5 * 3600 + 59 * 60))
+          
+          while true; do
+            RESTART_COUNT=$((RESTART_COUNT + 1))
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+            REMAINING=$((MAX_RUNTIME - ELAPSED))
+            
+            if [ $REMAINING -lt 60 ]; then
+              echo ""
+              echo "=========================================="
+              echo "⚠️ 1 MINUTE REMAINING!"
+              echo "Triggering new workflow..."
+              echo "=========================================="
+              
+              trigger_new_workflow
+              
+              echo "Waiting 30 seconds before exit..."
+              sleep 30
+              echo "Exiting..."
+              exit 0
+            fi
+            
+            echo ""
+            echo "=========================================="
+            echo "🚀 BOT RESTART #$RESTART_COUNT"
+            echo "⏱️ Runtime: $((ELAPSED / 3600))h $(((ELAPSED % 3600) / 60))m $((ELAPSED % 60))s"
+            echo "⏳ Remaining: $((REMAINING / 3600))h $(((REMAINING % 3600) / 60))m $((REMAINING % 60))s"
+            echo "📅 Time: $(date)"
+            echo "=========================================="
+            
+            run_bot
+            
+            echo "Restarting bot after crash..."
+            sleep 2
+          done
+          EOF
+          
+          chmod +x start_bot.sh
+          
+          export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          
+          screen -dmS bot bash start_bot.sh
+          
+          echo ""
+          echo "✅ Bot is running with auto restart"
+          echo "📊 Screen session: bot"
+          echo "📋 To monitor: screen -r bot"
+          echo "=========================================="
+          
+          cat > monitor.sh << 'MONITOR'
+          #!/bin/bash
+          
+          echo "Monitoring bot..."
+          
+          while true; do
+            sleep 60
+            
+            if ! screen -list | grep -q "bot"; then
+              echo "⚠️ Screen died! Restarting..."
+              screen -dmS bot bash start_bot.sh
+              echo "✅ Screen restarted"
+            fi
+            
+            if ! pgrep -f "node" > /dev/null; then
+              echo "⚠️ Node process not found! Restarting..."
+              screen -S bot -X quit 2>/dev/null || true
+              screen -dmS bot bash start_bot.sh
+              echo "✅ Bot restarted"
+            fi
+            
+            if ! pgrep -f "cloudflared" > /dev/null; then
+              echo "⚠️ Cloudflared died! Restarting..."
+              cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 &
+            fi
+            
+            if [ $((SECONDS % 300)) -eq 0 ]; then
+              echo "[$(date)] ✅ Bot is running..."
+              screen -ls
+            fi
+          done
+          MONITOR
+          
+          chmod +x monitor.sh
+          screen -dmS monitor bash monitor.sh
+          
+          echo "✅ Monitor running"
+          echo ""
+          
+          START_TIME=$(date +%s)
+          MAX_RUNTIME=$((5 * 3600 + 59 * 60))
+          
+          while true; do
+            sleep 300
+            
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+            REMAINING=$((MAX_RUNTIME - ELAPSED))
+            
+            echo "[$(date)] Workflow running"
+            echo "Runtime: $((ELAPSED / 3600))h $(((ELAPSED % 3600) / 60))m $((ELAPSED % 60))s"
+            echo "Remaining: $((REMAINING / 3600))h $(((REMAINING % 3600) / 60))m $((REMAINING % 60))s"
+            
+            if [ $REMAINING -lt 120 ] && [ $REMAINING -gt 60 ]; then
+              echo "🔄 Triggering new workflow (2 minutes remaining)..."
+              curl -X POST \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot.yml/dispatches \
+                -d '{"ref":"main"}'
+              echo "✅ New workflow triggered!"
+            fi
+            
+            if ! screen -list | grep -q "bot"; then
+              echo "⚠️ Bot screen died! Restarting..."
+              screen -dmS bot bash start_bot.sh
+            fi
+            
+            if ! screen -list | grep -q "monitor"; then
+              echo "⚠️ Monitor died! Restarting..."
+              screen -dmS monitor bash monitor.sh
+            fi
+            
+            if ! pgrep -f "cloudflared" > /dev/null; then
+              echo "⚠️ Cloudflared died! Restarting..."
+              cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 &
+            fi
+            
+            echo "Bot status:"
+            screen -ls
+            echo ""
+          done
