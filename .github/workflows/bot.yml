@@ -9,6 +9,11 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
+# 🔑 PERMISSIONS WAJIB: agar GITHUB_TOKEN bisa trigger workflow lain
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   bot:
     runs-on: ubuntu-latest
@@ -27,11 +32,43 @@ jobs:
             wget \
             git \
             unzip \
+            unrar-free \
+            p7zip-full \
             screen \
             jq \
             nano
           
           echo "Dependencies installed"
+      
+      # ==========================================================
+      #  🐘 INSTALL PHP (BARU)
+      # ==========================================================
+      - name: Install PHP
+        run: |
+          echo "=========================================="
+          echo "🐘 INSTALLING PHP"
+          echo "=========================================="
+          
+          sudo apt-get install -y -qq \
+            php-cli \
+            php-cgi \
+            php-curl \
+            php-mbstring \
+            php-xml \
+            php-json \
+            php-zip \
+            php-gd \
+            php-sqlite3
+          
+          echo ""
+          echo "✅ PHP installed:"
+          php -v
+          echo ""
+          echo "✅ PHP-CGI location:"
+          which php-cgi || echo "php-cgi tidak ada, pakai php CLI"
+          echo ""
+          echo "✅ PHP extensions:"
+          php -m
       
       - name: Install Cloudflared with Token
         run: |
@@ -44,9 +81,15 @@ jobs:
           cloudflared --version
           
           echo "Starting Cloudflared tunnel..."
-          cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 &
+          nohup cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 > /tmp/cloudflared.log 2>&1 &
           
-          echo "Cloudflared tunnel running"
+          sleep 3
+          if pgrep -f "cloudflared" > /dev/null; then
+            echo "✅ Cloudflared tunnel running"
+          else
+            echo "⚠️ Cloudflared gagal start, cek log:"
+            cat /tmp/cloudflared.log
+          fi
       
       - name: Unzip and Setup Bot Files
         run: |
@@ -54,12 +97,12 @@ jobs:
           echo "EXTRACTING ZIP FILES"
           echo "=========================================="
           
-          # Lihat semua file sebelum extract
           echo "Files before extraction:"
           ls -la
           echo ""
           
-          # Extract semua file .zip
+          # Extract .zip
+          shopt -s nullglob
           for zipfile in *.zip; do
             if [ -f "$zipfile" ]; then
               echo "📦 Extracting: $zipfile"
@@ -75,11 +118,18 @@ jobs:
             fi
           done
           
-          # Extract semua file .rar (jika ada)
+          # Extract .rar (pakai unrar-free, fallback ke 7z)
           for rarfile in *.rar; do
             if [ -f "$rarfile" ]; then
               echo "📦 Extracting: $rarfile"
-              unrar x -o+ "$rarfile"
+              if command -v unrar > /dev/null 2>&1; then
+                unrar x -o+ "$rarfile"
+              elif command -v 7z > /dev/null 2>&1; then
+                7z x "$rarfile" -y
+              else
+                echo "⚠️ Tidak ada unrar/7z, skip"
+                continue
+              fi
               if [ $? -eq 0 ]; then
                 echo "✅ Successfully extracted: $rarfile"
                 rm -f "$rarfile"
@@ -90,7 +140,7 @@ jobs:
             fi
           done
           
-          # Extract semua file .7z (jika ada)
+          # Extract .7z
           for sevenzfile in *.7z; do
             if [ -f "$sevenzfile" ]; then
               echo "📦 Extracting: $sevenzfile"
@@ -104,6 +154,7 @@ jobs:
               echo ""
             fi
           done
+          shopt -u nullglob
           
           echo "=========================================="
           echo "FILES AFTER EXTRACTION:"
@@ -113,6 +164,10 @@ jobs:
           
           echo "Checking for package.json files..."
           find . -name "package.json" -type f
+          echo ""
+          
+          echo "Checking for composer.json files..."
+          find . -name "composer.json" -type f
           echo ""
       
       - name: Setup Node.js 25
@@ -126,14 +181,13 @@ jobs:
           echo "INSTALLING NODE DEPENDENCIES"
           echo "=========================================="
           
-          # Install di root
           if [ -f "package.json" ]; then
             echo "📦 Found package.json in root, installing..."
             npm install --no-audit --no-fund --silent
             echo "✅ Root dependencies installed"
           fi
           
-          # Install di subfolder
+          shopt -s nullglob
           for dir in */; do
             if [ -f "${dir}package.json" ]; then
               echo "📦 Installing in: $dir"
@@ -143,70 +197,109 @@ jobs:
               echo "✅ Dependencies installed in $dir"
             fi
           done
+          shopt -u nullglob
           
           echo ""
           echo "✅ All dependencies installed"
       
+      # ==========================================================
+      #  🎼 INSTALL COMPOSER DEPENDENCIES (BARU)
+      # ==========================================================
+      - name: Install PHP Composer Dependencies
+        run: |
+          echo "=========================================="
+          echo "🎼 INSTALLING PHP COMPOSER DEPENDENCIES"
+          echo "=========================================="
+          
+          if [ -f "composer.json" ]; then
+            echo "📦 Found composer.json in root, installing..."
+            
+            # Install composer kalau belum ada
+            if ! command -v composer > /dev/null 2>&1; then
+              echo "📥 Installing Composer..."
+              curl -sS https://getcomposer.org/installer | php
+              sudo mv composer.phar /usr/local/bin/composer
+              sudo chmod +x /usr/local/bin/composer
+            fi
+            
+            composer install --no-interaction --no-progress --no-dev 2>&1 | tail -20
+            echo "✅ Root composer dependencies installed"
+          fi
+          
+          shopt -s nullglob
+          for dir in */; do
+            if [ -f "${dir}composer.json" ]; then
+              echo "📦 Installing composer in: $dir"
+              cd "$dir"
+              
+              if ! command -v composer > /dev/null 2>&1; then
+                curl -sS https://getcomposer.org/installer | php
+                sudo mv composer.phar /usr/local/bin/composer
+                sudo chmod +x /usr/local/bin/composer
+              fi
+              
+              composer install --no-interaction --no-progress --no-dev 2>&1 | tail -20
+              cd ..
+              echo "✅ Composer deps installed in $dir"
+            fi
+          done
+          shopt -u nullglob
+          
+          echo ""
+          echo "✅ All composer dependencies installed"
+      
       - name: Start Bot with Auto Restart
         env:
+          # 🔑 PENTING: pakai PAT (Personal Access Token) agar bisa trigger workflow
+          GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 🐘 PHP binary hint
+          PHP_BIN: php-cgi
         run: |
           echo "=========================================="
           echo "STARTING BOT WITH AUTO RESTART"
           echo "=========================================="
           echo "✅ Auto restart on crash (langsung jalan lagi)"
           echo "✅ Trigger new workflow setiap 6 jam (24/7)"
+          echo "✅ PHP available: $(php -v | head -1)"
           echo "=========================================="
+          
+          if [ -n "$GH_PAT" ]; then
+            TRIGGER_TOKEN="$GH_PAT"
+            echo "🔑 Menggunakan PAT untuk trigger workflow"
+          else
+            TRIGGER_TOKEN="$GITHUB_TOKEN"
+            echo "⚠️  PAT tidak ada, pakai GITHUB_TOKEN (mungkin gagal trigger workflow)"
+          fi
+          
+          echo "export TRIGGER_TOKEN='$TRIGGER_TOKEN'" > /tmp/token.env
+          echo "export REPO='$GITHUB_REPOSITORY'" >> /tmp/token.env
+          echo "export PHP_BIN='php-cgi'" >> /tmp/token.env
           
           cat > start_bot.sh << 'EOF'
           #!/bin/bash
           
+          source /tmp/token.env
+          
           echo "Starting bot with auto restart on crash..."
+          echo "PHP binary: $PHP_BIN"
           
           find_main_file() {
-            if [ -f "index.js" ]; then
-              echo "index.js"
-              return 0
-            fi
-            if [ -f "app.js" ]; then
-              echo "app.js"
-              return 0
-            fi
-            if [ -f "main.js" ]; then
-              echo "main.js"
-              return 0
-            fi
-            if [ -f "server.js" ]; then
-              echo "server.js"
-              return 0
-            fi
-            if [ -f "bot.js" ]; then
-              echo "bot.js"
-              return 0
-            fi
+            if [ -f "index.js" ]; then echo "index.js"; return 0; fi
+            if [ -f "app.js" ]; then echo "app.js"; return 0; fi
+            if [ -f "main.js" ]; then echo "main.js"; return 0; fi
+            if [ -f "server.js" ]; then echo "server.js"; return 0; fi
+            if [ -f "bot.js" ]; then echo "bot.js"; return 0; fi
             
+            shopt -s nullglob
             for dir in */; do
-              if [ -f "${dir}index.js" ]; then
-                echo "${dir}index.js"
-                return 0
-              fi
-              if [ -f "${dir}app.js" ]; then
-                echo "${dir}app.js"
-                return 0
-              fi
-              if [ -f "${dir}main.js" ]; then
-                echo "${dir}main.js"
-                return 0
-              fi
-              if [ -f "${dir}server.js" ]; then
-                echo "${dir}server.js"
-                return 0
-              fi
-              if [ -f "${dir}bot.js" ]; then
-                echo "${dir}bot.js"
-                return 0
-              fi
+              if [ -f "${dir}index.js" ]; then echo "${dir}index.js"; return 0; fi
+              if [ -f "${dir}app.js" ]; then echo "${dir}app.js"; return 0; fi
+              if [ -f "${dir}main.js" ]; then echo "${dir}main.js"; return 0; fi
+              if [ -f "${dir}server.js" ]; then echo "${dir}server.js"; return 0; fi
+              if [ -f "${dir}bot.js" ]; then echo "${dir}bot.js"; return 0; fi
             done
+            shopt -u nullglob
             
             echo ""
             return 1
@@ -230,6 +323,10 @@ jobs:
             echo "Started at: $(date)"
             echo "-----------------------------------"
             
+            # 🐘 Ensure PHP bisa ditemukan dari Node.js
+            export PHP_BIN=php-cgi
+            export PATH="/usr/bin:/usr/local/bin:$PATH"
+            
             node "$MAIN_FILE"
             
             EXIT_CODE=$?
@@ -247,13 +344,18 @@ jobs:
             echo "=========================================="
             echo "Time: $(date)"
             
-            curl -X POST \
-              -H "Authorization: token $GITHUB_TOKEN" \
+            HTTP_CODE=$(curl -s -o /tmp/trigger_resp.json -w "%{http_code}" -X POST \
+              -H "Authorization: token $TRIGGER_TOKEN" \
               -H "Accept: application/vnd.github.v3+json" \
-              https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/bot.yml/dispatches \
-              -d '{"ref":"main"}'
+              "https://api.github.com/repos/$REPO/actions/workflows/bot.yml/dispatches" \
+              -d '{"ref":"main"}')
             
-            echo "✅ New workflow triggered!"
+            if [ "$HTTP_CODE" = "204" ]; then
+              echo "✅ New workflow triggered! (HTTP $HTTP_CODE)"
+            else
+              echo "⚠️ Trigger response: HTTP $HTTP_CODE"
+              cat /tmp/trigger_resp.json 2>/dev/null
+            fi
             echo "=========================================="
           }
           
@@ -299,8 +401,6 @@ jobs:
           
           chmod +x start_bot.sh
           
-          export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
-          
           screen -dmS bot bash start_bot.sh
           
           echo ""
@@ -312,7 +412,10 @@ jobs:
           cat > monitor.sh << 'MONITOR'
           #!/bin/bash
           
+          source /tmp/token.env
+          
           echo "Monitoring bot..."
+          echo "PHP binary: $PHP_BIN"
           
           while true; do
             sleep 60
@@ -332,11 +435,12 @@ jobs:
             
             if ! pgrep -f "cloudflared" > /dev/null; then
               echo "⚠️ Cloudflared died! Restarting..."
-              cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 &
+              nohup cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 > /tmp/cloudflared.log 2>&1 &
             fi
             
             if [ $((SECONDS % 300)) -eq 0 ]; then
               echo "[$(date)] ✅ Bot is running..."
+              echo "   PHP: $(php -v 2>/dev/null | head -1 || echo 'not found')"
               screen -ls
             fi
           done
@@ -364,12 +468,17 @@ jobs:
             
             if [ $REMAINING -lt 120 ] && [ $REMAINING -gt 60 ]; then
               echo "🔄 Triggering new workflow (2 minutes remaining)..."
-              curl -X POST \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              HTTP_CODE=$(curl -s -o /tmp/trigger_resp.json -w "%{http_code}" -X POST \
+                -H "Authorization: token $TRIGGER_TOKEN" \
                 -H "Accept: application/vnd.github.v3+json" \
-                https://api.github.com/repos/${{ github.repository }}/actions/workflows/bot.yml/dispatches \
-                -d '{"ref":"main"}'
-              echo "✅ New workflow triggered!"
+                "https://api.github.com/repos/$REPO/actions/workflows/bot.yml/dispatches" \
+                -d '{"ref":"main"}')
+              if [ "$HTTP_CODE" = "204" ]; then
+                echo "✅ New workflow triggered!"
+              else
+                echo "⚠️ Trigger failed: HTTP $HTTP_CODE"
+                cat /tmp/trigger_resp.json 2>/dev/null
+              fi
             fi
             
             if ! screen -list | grep -q "bot"; then
@@ -384,10 +493,11 @@ jobs:
             
             if ! pgrep -f "cloudflared" > /dev/null; then
               echo "⚠️ Cloudflared died! Restarting..."
-              cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 &
+              nohup cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 > /tmp/cloudflared.log 2>&1 &
             fi
             
             echo "Bot status:"
+            echo "   PHP: $(php -v 2>/dev/null | head -1 || echo 'not found')"
             screen -ls
             echo ""
           done
