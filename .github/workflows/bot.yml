@@ -38,7 +38,8 @@ jobs:
             screen \
             jq \
             nano \
-            tree
+            tree \
+            openssl
 
           echo "✅ Dependencies installed"
 
@@ -111,7 +112,6 @@ jobs:
           ls -la
           echo ""
 
-          # Extract .zip
           shopt -s nullglob
           for zipfile in *.zip; do
             if [ -f "$zipfile" ]; then
@@ -127,7 +127,6 @@ jobs:
             fi
           done
 
-          # Extract .rar
           for rarfile in *.rar; do
             if [ -f "$rarfile" ]; then
               echo "📦 Extracting: $rarfile"
@@ -147,7 +146,6 @@ jobs:
             fi
           done
 
-          # Extract .7z
           for sevenzfile in *.7z; do
             if [ -f "$sevenzfile" ]; then
               echo "📦 Extracting: $sevenzfile"
@@ -265,6 +263,91 @@ jobs:
           echo "✅ All composer dependencies installed"
 
       # ==========================================================
+      #  🎵 AUTO-INSTALL AUDIOVAULT (SEBELUM START BOT)
+      # ==========================================================
+      - name: Install Audiovault
+        run: |
+          echo "=========================================="
+          echo "🎵 INSTALLING AUDIOVAULT (Spotify → MP3)"
+          echo "=========================================="
+
+          if ! command -v docker > /dev/null 2>&1; then
+            echo "❌ Docker tidak ada di runner"
+            exit 1
+          fi
+
+          echo "✅ Docker version:"
+          docker --version
+          echo "✅ Docker Compose version:"
+          docker compose version
+          echo ""
+
+          AV_DIR="Audiovault"
+
+          if [ -d "$AV_DIR" ]; then
+            echo "⚠️  Folder Audiovault sudah ada, skip clone"
+          else
+            echo "📥 Cloning Audiovault..."
+            git clone --depth 1 https://github.com/Bl4nk44/Audiovault.git "$AV_DIR"
+          fi
+
+          cd "$AV_DIR"
+
+          if [ ! -f ".env" ]; then
+            echo "🔧 Setup .env..."
+            if [ -f ".env.example" ]; then
+              cp .env.example .env
+            else
+              touch .env
+            fi
+            PASS=$(openssl rand -hex 16)
+            if grep -q "^ADMIN_PASSWORD=" .env; then
+              sed -i "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=${PASS}/" .env
+            else
+              echo "ADMIN_PASSWORD=${PASS}" >> .env
+            fi
+            echo "🔑 Audiovault ADMIN_PASSWORD: ${PASS}"
+          fi
+
+          echo ""
+          echo "🐳 Pull images..."
+          docker compose pull 2>&1 | tail -5 || true
+
+          echo ""
+          echo "🐳 Build & start (butuh 2-3 menit)..."
+          docker compose up -d --build 2>&1 | tail -20
+
+          echo ""
+          echo "⏳ Tunggu container siap..."
+          sleep 15
+
+          echo ""
+          echo "📊 Container status:"
+          docker compose ps
+
+          echo ""
+          echo "🔍 Cek health:"
+          for i in 1 2 3 4 5; do
+            if curl -sf http://127.0.0.1:8000/health > /dev/null 2>&1; then
+              echo "✅ Audiovault API UP"
+              break
+            fi
+            echo "⏳ Attempt $i: belum siap, tunggu 5s..."
+            sleep 5
+          done
+
+          echo ""
+          echo "📋 Container logs (tail 20):"
+          docker compose logs --tail 20
+
+          cd - > /dev/null
+
+          echo ""
+          echo "✅ Audiovault installed & started"
+          echo "   Web UI : http://127.0.0.1:2137"
+          echo "   API    : http://127.0.0.1:8000/docs"
+
+      # ==========================================================
       #  🚀 RUN ALL BOTS WITH CONSOLE LOG
       # ==========================================================
       - name: Start All Bots with Auto Restart
@@ -272,6 +355,7 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PHP_BIN: php-cgi
+          AUDIOVAULT_API: http://127.0.0.1:8000
         run: |
           echo "=========================================="
           echo "🚀 STARTING ALL BOTS"
@@ -294,6 +378,7 @@ jobs:
           echo "export TRIGGER_TOKEN='$TRIGGER_TOKEN'" > /tmp/token.env
           echo "export REPO='$GITHUB_REPOSITORY'" >> /tmp/token.env
           echo "export PHP_BIN='php-cgi'" >> /tmp/token.env
+          echo "export AUDIOVAULT_API='http://127.0.0.1:8000'" >> /tmp/token.env
           echo "export PATH='/usr/bin:/usr/local/bin:\$PATH'" >> /tmp/token.env
 
           # ==================================================
@@ -306,6 +391,7 @@ jobs:
 
           echo "Starting ALL bots with auto restart on crash..."
           echo "PHP binary: $PHP_BIN"
+          echo "Audiovault: $AUDIOVAULT_API"
           echo ""
 
           declare -a BOT_FILES=()
@@ -313,7 +399,6 @@ jobs:
           find_all_bots() {
             BOT_FILES=()
 
-            # 1. File .js di root
             shopt -s nullglob
             for f in *.js; do
               [ -f "$f" ] || continue
@@ -326,11 +411,10 @@ jobs:
               fi
             done
 
-            # 2. Subdirectory dengan package.json atau file entry point
             for dir in */; do
               [ -d "$dir" ] || continue
               case "$dir" in
-                node_modules/|.git/|vendor/|.github/) continue ;;
+                node_modules/|.git/|vendor/|.github/|Audiovault/) continue ;;
               esac
 
               if [ -f "${dir}package.json" ]; then
@@ -366,6 +450,36 @@ jobs:
             echo ""
           }
 
+          # ==================================================
+          #  🎵 START / RESTART AUDIOVAULT
+          # ==================================================
+          start_audiovault() {
+            local AV_DIR="Audiovault"
+
+            if ! command -v docker > /dev/null 2>&1; then
+              echo "⚠️  Docker tidak ada, skip Audiovault"
+              return 0
+            fi
+
+            if [ ! -d "$AV_DIR" ]; then
+              echo "⚠️  Folder Audiovault tidak ada, skip"
+              return 0
+            fi
+
+            cd "$AV_DIR" || return 1
+
+            # Cek apakah container sudah jalan
+            if docker compose ps 2>/dev/null | grep -q "Up"; then
+              echo "✅ Audiovault sudah running"
+              cd - > /dev/null
+              return 0
+            fi
+
+            echo "🔄 Start Audiovault..."
+            docker compose up -d 2>&1 | tail -10
+            cd - > /dev/null
+          }
+
           run_single_bot() {
             local MAIN_FILE="$1"
             local BOT_DIR=$(dirname "$MAIN_FILE")
@@ -375,7 +489,6 @@ jobs:
             echo "🚀 [$(date '+%H:%M:%S')] Starting: $MAIN_FILE (from $BOT_DIR)"
 
             cd "$BOT_DIR"
-            # Console log real-time dengan prefix
             node "$BOT_FILE" 2>&1 | stdbuf -oL -eL sed -u "s/^/[$BOT_NAME] /"
             local EXIT_CODE=${PIPESTATUS[0]}
             cd - > /dev/null
@@ -405,7 +518,6 @@ jobs:
               return 1
             fi
 
-            # Jalankan tiap bot di background dengan loop restart masing-masing
             local PIDS=()
             for MAIN_FILE in "${BOT_FILES[@]}"; do
               run_bot_forever "$MAIN_FILE" &
@@ -418,7 +530,6 @@ jobs:
             echo "=========================================="
             echo ""
 
-            # Tunggu semua proses
             for pid in "${PIDS[@]}"; do
               wait "$pid"
             done
@@ -426,6 +537,7 @@ jobs:
 
           # Re-scan dan restart semua kalau ada yang mati
           while true; do
+            start_audiovault
             run_all_bots
             echo "⚠️ All bots exited. Re-scanning in 10s..."
             sleep 10
@@ -460,9 +572,18 @@ jobs:
               nohup cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 > /tmp/cloudflared.log 2>&1 &
             fi
 
+            # Cek Audiovault
+            if command -v docker > /dev/null 2>&1 && [ -d "Audiovault" ]; then
+              if ! (cd Audiovault && docker compose ps 2>/dev/null | grep -q "Up"); then
+                echo "⚠️ [$(date)] Audiovault died! Restarting..."
+                (cd Audiovault && docker compose up -d 2>&1 | tail -5)
+              fi
+            fi
+
             echo "[$(date)] ✅ Monitor check"
             echo "   PHP: $(php -v 2>/dev/null | head -1 || echo 'not found')"
             echo "   Node processes: $(pgrep -f node | wc -l)"
+            echo "   Audiovault: $(cd Audiovault 2>/dev/null && docker compose ps 2>/dev/null | grep -c 'Up' || echo 0) container(s) up"
             screen -ls || true
           done
           MONITOREOF
@@ -487,7 +608,7 @@ jobs:
           echo ""
 
           # ==================================================
-          #  MAIN LOOP — PRINT CONSOLE LOG KE GITHUB ACTIONS
+          #  MAIN LOOP
           # ==================================================
           START_TIME=$(date +%s)
           MAX_RUNTIME=$((5 * 3600 + 50 * 60))
@@ -510,10 +631,8 @@ jobs:
             echo "   Remaining : $((REMAINING / 3600))h $(((REMAINING % 3600) / 60))m $((REMAINING % 60))s"
             echo "════════════════════════════════════════════"
 
-            # Tampilkan console log terakhir dari setiap bot (via screen hardcopy)
             if screen -list | grep -q "bot"; then
               echo "📺 Bot screen is ALIVE"
-              # Dump layar bot
               screen -S bot -X hardcopy /tmp/bot_screen.log 2>/dev/null
               if [ -f /tmp/bot_screen.log ]; then
                 echo "───── 📜 BOT CONSOLE (last 40 lines) ─────"
@@ -525,13 +644,19 @@ jobs:
               screen -dmS bot bash start_bot.sh
             fi
 
-            # Restart cloudflared kalau mati
             if ! pgrep -f "cloudflared" > /dev/null; then
               echo "⚠️ Cloudflared died! Restarting..."
               nohup cloudflared tunnel run --token eyJhIjoiY2FkNjFhM2UyYzk5Y2NiN2IwNTQ2MmU0MWY1N2JjNTYiLCJ0IjoiMzRlYzljNzEtYWNmZC00MzA1LTlkNjEtMzMxZGFiMGRiNTBiIiwicyI6Ik5XSXhaVFJqTlRZdFpXVm1PQzAwTnpZNExXRTBORGt0TVdFNU5UQTFPREprWVdNeSJ9 > /tmp/cloudflared.log 2>&1 &
             fi
 
-            # Trigger workflow baru di sisa 5 menit
+            # Cek Audiovault
+            if command -v docker > /dev/null 2>&1 && [ -d "Audiovault" ]; then
+              if ! (cd Audiovault && docker compose ps 2>/dev/null | grep -q "Up"); then
+                echo "⚠️ Audiovault died! Restarting..."
+                (cd Audiovault && docker compose up -d 2>&1 | tail -5)
+              fi
+            fi
+
             if [ $REMAINING -lt 300 ] && [ $LAST_TRIGGER -eq 0 ]; then
               echo ""
               echo "🔄 Triggering new workflow (5 min remaining)..."
